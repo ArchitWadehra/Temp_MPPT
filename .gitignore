@@ -1,8 +1,5 @@
-.ipynb_checkpoints/
-*.npy
-*.mat
-logs/tensorboard/
-events.out.tfevents.*
+# Over GitHub's 100 MB file limit
+PPO_new_win/irrtempgmpp.npy
 V2/Main_hyper.ipynb
 
 .DS_Store
