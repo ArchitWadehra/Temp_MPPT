@@ -1,0 +1,13 @@
+.ipynb_checkpoints/
+*.npy
+*.mat
+logs/tensorboard/
+events.out.tfevents.*
+V2/Main_hyper.ipynb
+
+.DS_Store
+__pycache__/
+*.pyc
+venv/
+.venv/
+.env

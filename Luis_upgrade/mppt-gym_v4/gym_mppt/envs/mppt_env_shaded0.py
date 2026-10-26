@@ -1,0 +1,220 @@
+import gym
+from gym import spaces
+import numpy as np
+import random
+
+class Panel(object):
+
+    def __init__(self):
+        self.TK = 273 # Kelvin temperature
+        self.Tr1 = 40  # Reference temperature in degree fahrenheit
+        # self.S = 100  # Solar radiation in mW / sq.cm
+        self.ki = 0.00023  # in A / K
+        self.Iscr = 3.75  # SC Current at ref.temp. in A
+        self.Irr = 0.000021  # in A
+        self.k = 1.38065e-23  # Boltzmann constant
+        self.q = 1.6022e-19  # charge of an electron
+        self.A = 2.15 # ideality factor
+        self.Eg0 = 1.166 # band gap energy
+        self.alpha = 0.473
+        self.beta = 636
+        # panel composed of Np parallel modules each one including Ns photovoltaic cells connected
+        self.Np = 1
+        self.Ns = 36
+        self.Rs = 1e-5
+        self.Rsh = 1e5
+
+    def calc_pv(self, G, T, vx, SH):
+        # cell temperature
+        Tcell = T + self.TK
+        # cell reference temperature in kelvin
+        Tr = ((self.Tr1 - 32) * (5 / 9)) + 273
+        # band gap energy of semiconductor
+        Eg = self.Eg0 - (self.alpha * Tcell * Tcell) / (Tcell + self.beta) * self.q
+        # generated photocurrent
+        Iph = (self.Iscr + self.ki * (Tcell - Tr)) * (G / 1000)
+        # cell reverse saturation current
+        Irs = self.Irr * ((Tcell / Tr) ** 3) * np.exp(self.q * Eg / (self.k * self.A) * ((1 / Tr) - (1 / Tcell)))
+        # panel output current
+        I = self.Np * Iph - self.Np * Irs * (np.exp(self.q / (self.k * Tcell * self.A) * vx * (1/SH) / self.Ns) - 1)
+        
+        Vt = self.k * Tcell * self.A / self.q 
+    
+        steps = 0
+        diff = float('inf')
+        while diff > 1e-3:
+            if steps > 100:
+                break
+            steps += 1
+            fv = I - (Iph*self.Np - Irs*self.Np*(np.exp(((vx/(self.Ns*SH)) + ((I*self.Rs)/self.Np))/Vt) - 1) - ((((vx*self.Np)/self.Ns) + (I*self.Rs))/self.Rsh))
+#             fv = I - (Iph*self.Np - Irs*self.Np*(np.exp(((vx/(self.Ns*SH)) + ((I*self.Rs)/self.Np))/Vt) - 1))
+            fdv = 1 + (self.Rs/self.Rsh) + ((np.exp(((vx/(self.Ns*SH)) + ((I*self.Rs)/self.Np))/Vt)*Irs*self.Rs)/(Vt))
+#             fdv = 1                      + ((np.exp(((vx/(self.Ns*SH)) + ((I*self.Rs)/self.Np))/Vt)*Irs*self.Rs)/(Vt))
+            # In = I - (fv./fdv)
+            In = I - fv/fdv
+            diff = abs(abs(In) - abs(I))
+            I = In
+        
+        # panel output voltage
+        V = vx # este es el Vg?
+        # panel power
+        P = vx * I
+
+        return I,V,P
+
+
+class Shaded(object):
+    def __init__(self):
+#         self.G = [100, 1000]  # read irradiance # Solar radiation in mW / sq.cm / Esto es la irradiancia para panel cuando [sombredo,sin_sombra]
+        #self.T = 25  # read temperature # ojo con kelvin 273
+        #self.SH = [4, 10, 7, 10, 10, 10]  # Shaded modules
+        self.Mp = 10  # Modules in parallel
+        self.Ng = [40, 38, 22]  # Parallel-connected series assemblies
+        self.Iscr_sh = 0.375
+
+    def data(self, Irradiancia_maxima, T, V, SH):
+        self.G = [Irradiancia_maxima//10, Irradiancia_maxima]
+        # G_ar = np.array(G) # Solar radiation in mW/sq.cm
+
+        pv = Panel()
+#         IUN = []
+#         ISH = []
+        Ipv = []
+
+        for j in range(len(self.Ng)):
+            # IUN_i = pv.calc_pv(Irradiancia_maxima, T, V, SH[j*2])[0] # asi estaria bien hecho, pero como dejamos fija la irradiancia maxima lo tomamos del self.G[1]
+            IUN_i = pv.calc_pv(self.G[1], T, V, SH[j*2])[0]
+#             if IUN_i < 0:
+#                 IUN_i = 0
+#             IUN.append(IUN_i)
+            ISH_i = pv.calc_pv(self.G[0], T, V, SH[j*2+1])[0]
+#             if ISH_i < 0:
+#                 ISH_i = 0
+#             ISH.append(ISH_i)
+            Ipv.append(max(0, IUN_i, ISH_i))
+
+#         for jj in (range(len(self.Ng))):
+#             if IUN[jj] > self.Iscr_sh:
+#                 Ipv.append(IUN[jj])
+#             else:
+#                 Ipv.append(ISH[jj])
+
+        
+        IT = Ipv[0] * self.Ng[0] + Ipv[1] * self.Ng[1] + Ipv[2] * self.Ng[2]
+        VT = V
+        PT = IT*VT
+        return IT, VT, max(0.0, PT) 
+
+
+class MpptEnvShaded_0(gym.Env):
+    metadata = {}
+
+    def __init__(self):
+        # self._Pmaxnpy = np.load('Pmax.npy')
+        self._Pmaxnpy = np.load("C:/Users/archi/Python Code/BTP/Luis_upgrade/mppt-gym_v4/gym_mppt/envs/Pmax.npy")
+        self._Irrlst = np.load("C:/Users/archi/Python Code/BTP/Luis_upgrade/mppt-gym_v4/gym_mppt/envs/irr.npy")
+        self._Templst = np.load("C:/Users/archi/Python Code/BTP/Luis_upgrade/mppt-gym_v4/gym_mppt/envs/temp.npy")
+        
+#         self._Pmaxnpy = np.load('/home/archi/Code/Pmax.npy')
+        self._Max_steps = 300
+
+#         self.observation_space = spaces.Dict(
+#             {
+#                 "Voltage": spaces.Box(low = 0.0, high = 212.0, shape=(1,), dtype=np.float32),
+#                 "Power": spaces.Box(low = 0.0, high = np.inf, shape=(1,), dtype=np.float32),
+#                 "deltaPower": spaces.Box(low = -1 * np.inf, high = np.inf, shape=(1,), dtype=np.float32)
+#             }
+#         )
+
+        self.action_space = spaces.Box(low = -10.0, high = 10.0, shape=(1,), dtype=np.float32)
+        self.observation_space = spaces.Box(low = np.array([0.0, 0.0, -1 * np.inf]), high = np.array([212.0, np.inf, np.inf]), shape=(3,), dtype=np.float32)
+
+
+    def _get_obs(self):
+        # return {"Voltage" : self._Voltage, "Power" : self._Power, "deltaPower" : self._deltaPower}
+        # return np.array([self._Voltage, self._Power, self._deltaPower]).flatten()
+        return self.current_state
+    
+    def _get_info(self):
+        return {"Steps" : self._Steps, "Current" : self._Current, "Temperature" : self._Temp, "Irradiance" : self._Irr, "Shading" : self._SH}
+        
+    def reset(self):
+#         self.current_state = self.observation_space.sample()
+        
+        self._Voltage = 0.
+        self._Power = 0.
+        self._deltaPower = 0.
+        
+        # Reset our globals
+#         self.current_state['Voltage'] = np.array([self._Voltage], dtype=np.float32)
+#         self.current_state['Power'] = np.array([self._Power], dtype=np.float32)
+#         self.current_state['deltaPower'] = np.array([self._deltaPower], dtype=np.float32)
+        self.current_state = np.array([self._Voltage, self._Power, self._deltaPower], dtype=np.float32)
+        
+        observation = self._get_obs()
+
+        self._Steps = 0
+        self._Current = 0.
+#         self._Temp = 25.
+        self._Temp =  random.randint(10, 50)
+#         self._Irr = 600
+        self._Irr =  random.randint(100, 1000)
+        a = random.sample([1,2,3,4,5,6,7,8,9,10],1)[0]
+        b = random.sample([1,2,3,4,5,6,7,8,9,10],1)[0]
+        c = random.sample([1,2,3,4,5,6,7,8,9,10],1)[0]
+        self._SH = [a, 10, b, 10, c, 10]
+        info = self._get_info()
+
+        # return observation, info
+        return observation
+    
+    def step(self, action):
+        self._Steps += 1
+        
+#         self._Irr = self._Irrlst[self._Steps]
+#         self._Temp = self._Templst[self._Steps]
+        
+        self._Voltage += action
+        self._Voltage = min(max(0.0, self._Voltage), 212.0)
+        oldP = self._Power
+
+        # PVobj = PV(self._Irr, self._Temp, self._SH, self._Voltage)
+        # self._Current, self._Voltage, self._Power = PVobj.array()
+
+        pv = Shaded()
+        self._Current, self._Voltage, self._Power = pv.data(self._Irr, self._Temp, self._Voltage, self._SH)
+        self._deltaPower = self._Power - oldP
+        
+        done = bool(self._Steps>=self._Max_steps)
+        reward = self.reward_function()
+        info = self._get_info()
+        
+#         self.current_state['Voltage'] = np.array([self._Voltage], dtype=np.float32)
+#         self.current_state['Power'] = np.array([self._Power], dtype=np.float32)
+#         self.current_state['deltaPower'] = np.array([self._deltaPower], dtype=np.float32)
+        self.current_state = np.array([self._Voltage, self._Power, self._deltaPower], dtype=np.float32).reshape((3,))
+        observation = self._get_obs()
+        
+        return observation, float(reward), done, info
+
+    def reward_function(self):
+        if self._Power<=0:
+            r = -1
+        else:
+            r = np.round(((self._Power/50000), 5))
+        return r
+#         return np.round(self._Power/50000, 5)
+    
+    def render(self):
+        pass
+
+    def close(self):
+        pass
+    
+    ### Temporary
+    def setTempIrr(self,last_state,T,G,SH):
+        self._Temp = T
+        self._Irr = G
+        self._SH = SH
+        return last_state
+

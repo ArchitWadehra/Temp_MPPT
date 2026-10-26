@@ -1,0 +1,10 @@
+1. Download Anaconda Anvigator and create environment
+conda create --prefix D:\Python\envs\btp -c conda-forge tensorflow-gpu=1.15 python=3.6
+
+2. Setup Gym 
+cd mppt-gym
+pip install -e .
+
+
+Using python 3.5
+conda create --prefix D:\Python\envs\btp4 -c conda-forge tensorflow-gpu=1.10 python=3.5
